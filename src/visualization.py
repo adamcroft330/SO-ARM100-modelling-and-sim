@@ -34,23 +34,23 @@ class RobotVisualizer:
         # Add a grid
         self.ax.grid(True)
         
-def _update_robot_plot(self, joint_positions: np.ndarray):
-    """Update the robot arm visualization."""
-    x = joint_positions[:, 0]
-    y = joint_positions[:, 1]
-    z = joint_positions[:, 2]
-    
-    if 'arm' not in self.lines:
-        # First time plotting - create the line
-        self.lines['arm'], = self.ax.plot(x, y, z, 'b-', linewidth=2, label='Robot Arm')
-        self.points['joints'] = self.ax.scatter(x, y, z, c='b', marker='o')
-    else:
-        # Update existing line
-        self.lines['arm'].set_data_3d(x, y, z)
-        # For scatter plot, need to update differently
-        self.points['joints'].remove()
-        self.points['joints'] = self.ax.scatter(x, y, z, c='b', marker='o')            
+    def _update_robot_plot(self, joint_positions: np.ndarray):
+        """Update the robot arm visualization."""
+        x = joint_positions[:, 0]
+        y = joint_positions[:, 1]
+        z = joint_positions[:, 2]
         
+        if 'arm' not in self.lines:
+            # First time plotting - create the line
+            self.lines['arm'], = self.ax.plot(x, y, z, 'b-', linewidth=2, label='Robot Arm')
+            self.points['joints'] = self.ax.scatter(x, y, z, c='b', marker='o')
+        else:
+            # Update existing line
+            self.lines['arm'].set_data_3d(x, y, z)
+            # For scatter plot, need to update differently
+            self.points['joints'].remove()
+            self.points['joints'] = self.ax.scatter(x, y, z, c='b', marker='o')
+            
     def visualize_ik_solution(self, target_position: np.ndarray, 
                             initial_guess: List[float] = None,
                             max_iterations: int = 100,
@@ -115,24 +115,9 @@ def _update_robot_plot(self, joint_positions: np.ndarray):
         plt.legend()
         plt.show()
         
-def _animate(self, frame):
-    """Animation update function."""
-    self._update_robot_plot(self.ik_frames[frame])
-    self.ax.set_title(f'IK Solution Process - Step {frame}')
-    # Return only the line since we're handling the scatter plot separately
-    return (self.lines['arm'],)
-
-def visualize_ik_example():
-    """Example usage of the visualization."""
-    # Create visualizer
-    viz = RobotVisualizer()
-    
-    # Define target position (within workspace)
-    target_position = np.array([0.15, 0, 0.2])
-    
-    # Visualize IK solution
-    viz.visualize_ik_solution(target_position)
-
-# Add to test script
-if __name__ == "__main__":
-    visualize_ik_example()
+    def _animate(self, frame):
+        """Animation update function."""
+        self._update_robot_plot(self.ik_frames[frame])
+        self.ax.set_title(f'IK Solution Process - Step {frame}')
+        # Return only the line since we're handling the scatter plot separately
+        return (self.lines['arm'],)
