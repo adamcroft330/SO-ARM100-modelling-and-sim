@@ -1,6 +1,6 @@
 # src/kinematics.py
 import numpy as np
-from typing import Tuple, List, Union
+from typing import Tuple, List, Union, Optional
 from .config import RobotConfig, default_config
 
 def transform_matrix(theta: float, d: float, a: float, alpha: float) -> np.ndarray:
@@ -15,19 +15,86 @@ def transform_matrix(theta: float, d: float, a: float, alpha: float) -> np.ndarr
     Returns:
         4x4 numpy array transformation matrix
     """
+    ct = np.cos(theta)
+    st = np.sin(theta)
+    ca = np.cos(alpha)
+    sa = np.sin(alpha)
+    
     return np.array([
-        [np.cos(theta), -np.sin(theta)*np.cos(alpha),  np.sin(theta)*np.sin(alpha), a*np.cos(theta)],
-        [np.sin(theta),  np.cos(theta)*np.cos(alpha), -np.cos(theta)*np.sin(alpha), a*np.sin(theta)],
-        [0,             np.sin(alpha),                np.cos(alpha),                d],
-        [0,             0,                           0,                             1]
+        [ct, -st*ca,  st*sa, a*ct],
+        [st,  ct*ca, -ct*sa, a*st],
+        [0,   sa,     ca,    d   ],
+        [0,   0,      0,     1   ]
     ])
+
+def get_joint_positions(joint_angles: List[float], 
+                       config: RobotConfig = default_config) -> np.ndarray:
+    """Calculate positions of all joints for visualization.
+    
+    This function returns the positions of all joints including servo centers
+    and connecting points for accurate visualization.
+    
+    Args:
+        joint_angles: List of 6 joint angles
+        config: Robot configuration object
+        
+    Returns:
+        numpy array: Nx3 array of joint positions and key points
+    """
+    # Validate joint angles
+    valid, message = config.check_joint_limits(joint_angles)
+    if not valid:
+        raise ValueError(f"Invalid joint angles: {message}")
+    
+    # Get DH parameters
+    dh_params = config.get_dh_parameters(joint_angles)
+    
+    # Initialize positions array for all key points
+    positions = []
+    
+    # Base position and center
+    positions.append(np.array([0, 0, 0]))  # Base bottom center
+    positions.append(np.array([0, 0, config.base_height]))  # Base top center
+    
+    # Calculate transformations and positions
+    T = np.eye(4)
+    
+    # Add positions for each joint's key points
+    for i, (theta, d, a, alpha) in enumerate(dh_params):
+        # Store current position before transform
+        pos = T[:3, 3].copy()
+        positions.append(pos)  # Joint base position
+        
+        # Update transformation
+        T = T @ transform_matrix(theta, d, a, alpha)
+        
+        # Add additional points for visualization if needed
+        if i == 1:  # Shoulder joint
+            # Add point for upper arm
+            pos = T[:3, 3].copy()
+            positions.append(pos - np.array([0, 0, config.servo_height/2]))
+            
+        elif i == 2:  # Elbow joint
+            # Add point for forearm
+            pos = T[:3, 3].copy()
+            positions.append(pos - np.array([0, 0, config.servo_height/2]))
+            
+        elif i == 4:  # Wrist roll joint
+            # Add points for gripper mount
+            pos = T[:3, 3].copy()
+            positions.append(pos)
+    
+    # Add final end-effector position
+    positions.append(T[:3, 3])
+    
+    return np.array(positions)
 
 def forward_kinematics(joint_angles: List[float], 
                       config: RobotConfig = default_config) -> Tuple[np.ndarray, np.ndarray]:
     """Calculate end-effector position and orientation given joint angles.
     
     Args:
-        joint_angles: List of 4 joint angles [shoulder, elbow, wrist, gripper]
+        joint_angles: List of 6 joint angles
         config: Robot configuration object
         
     Returns:
@@ -36,168 +103,23 @@ def forward_kinematics(joint_angles: List[float],
     # Validate joint angles
     valid, message = config.check_joint_limits(joint_angles)
     if not valid:
-        raise ValueError(f"Joint angles out of limits: {message}")
+        raise ValueError(f"Invalid joint angles: {message}")
     
-    # Get DH parameters for current configuration
+    # Calculate cumulative transformation
+    T = np.eye(4)
     dh_params = config.get_dh_parameters(joint_angles)
     
-    # Initialize transformation matrix
-    T = np.eye(4)
+    for params in dh_params:
+        T = T @ transform_matrix(*params)
     
-    # Compute forward kinematics
-    for theta, d, a, alpha in dh_params:
-        T = T @ transform_matrix(theta, d, a, alpha)
-        
-    # Extract position
+    # Extract position and orientation
     position = T[:3, 3]
     
-    # Extract orientation (roll, pitch, yaw)
-    orientation = rotm2euler(T[:3, :3])
+    # Convert rotation matrix to Euler angles (ZYX convention)
+    R = T[:3, :3]
+    orientation = rotm2euler(R)
     
     return position, orientation
-
-def calculate_jacobian(joint_angles: List[float], 
-                      config: RobotConfig = default_config) -> np.ndarray:
-    """Calculate the Jacobian matrix for the SO-ARM100 robot.
-    
-    The Jacobian J maps joint velocities to end-effector velocities:
-    [ẋ] = J * [θ̇₁]
-    [ẏ]     [θ̇₂]
-    [ż]     [θ̇₃]
-    
-    Args:
-        joint_angles: List of 4 joint angles [shoulder, elbow, wrist, gripper]
-        config: Robot configuration object
-        
-    Returns:
-        numpy array: 6x4 Jacobian matrix (linear and angular velocities)
-    """
-    theta1, theta2, theta3, theta4 = joint_angles
-    l1, l2, l3 = config.link1_length, config.link2_length, config.gripper_length
-    
-    # Pre-calculate trigonometric terms
-    c1 = np.cos(theta1)
-    s1 = np.sin(theta1)
-    c2 = np.cos(theta2)
-    s2 = np.sin(theta2)
-    c23 = np.cos(theta2 + theta3)
-    s23 = np.sin(theta2 + theta3)
-
-    # Position of end-effector relative to each joint axis
-    r1 = np.array([
-        l1*c2 + l2*c23 + l3*c23,
-        0,
-        -l1*s2 - l2*s23 - l3*s23
-    ])
-
-    r2 = np.array([
-        l2*c23 + l3*c23,
-        0,
-        -l2*s23 - l3*s23
-    ])
-
-    r3 = np.array([
-        l3*c23,
-        0,
-        -l3*s23
-    ])
-
-    # Calculate z-axis unit vectors for each joint
-    z0 = np.array([0, 1, 0])  # Shoulder rotation axis (y-axis)
-    z1 = np.array([0, 0, 1])  # Elbow rotation axis (z-axis)
-    z2 = np.array([0, 0, 1])  # Wrist rotation axis (z-axis)
-
-    # Linear velocity components
-    J1 = np.cross(z0, r1)
-    J2 = np.cross(z1, r2)
-    J3 = np.cross(z2, r3)
-
-    # Construct the Jacobian matrix
-    J = np.zeros((6, 4))
-    
-    # Linear velocity components
-    J[0:3, 0] = J1
-    J[0:3, 1] = J2
-    J[0:3, 2] = J3
-    J[0:3, 3] = 0
-    
-    # Angular velocity components
-    J[3:6, 0] = z0
-    J[3:6, 1] = z1
-    J[3:6, 2] = z2
-    J[3:6, 3] = np.array([0, 0, 1])
-
-    return J
-
-def inverse_kinematics_position_only(target_position: np.ndarray,
-                                   initial_guess: List[float] = None,
-                                   config: RobotConfig = default_config,
-                                   max_iterations: int = 100,
-                                   tolerance: float = 1e-3) -> Tuple[List[float], bool]:
-    """Calculate joint angles for a desired end-effector position (ignoring orientation).
-    
-    Args:
-        target_position: Desired end-effector position [x, y, z]
-        initial_guess: Initial joint angles guess. If None, uses home position
-        config: Robot configuration object
-        max_iterations: Maximum iterations for convergence
-        tolerance: Error tolerance for convergence
-    
-    Returns:
-        Tuple[List[float], bool]: (joint_angles, success)
-    """
-    # Check if target is within reach
-    target_distance = np.linalg.norm(target_position)
-    if target_distance > config.max_reach:
-        print(f"Target at {target_distance:.3f}m is beyond max reach of {config.max_reach:.3f}m")
-        return initial_guess if initial_guess is not None else config.home_position, False
-    
-    if initial_guess is None:
-        current_joints = np.array(config.home_position)
-    else:
-        current_joints = np.array(initial_guess)
-    
-    print(f"Starting IK solution search:")
-    print(f"Target position: {target_position}")
-    print(f"Initial joints: {current_joints}")
-    
-    for iteration in range(max_iterations):
-        # Get current end-effector position
-        current_position, _ = forward_kinematics(list(current_joints), config)
-        
-        # Calculate position error
-        error = target_position - current_position
-        error_magnitude = np.linalg.norm(error)
-        
-        if iteration % 10 == 0:  # Print debug info every 10 iterations
-            print(f"Iteration {iteration}: Error = {error_magnitude:.6f}")
-        
-        # Check if we've reached the target within tolerance
-        if error_magnitude < tolerance:
-            print(f"Solution found in {iteration} iterations!")
-            return list(current_joints), True
-        
-        # Calculate Jacobian
-        J = calculate_jacobian(list(current_joints), config)
-        J = J[:3, :]  # Only use position rows of Jacobian
-        
-        # Damped least squares solution
-        damping = 0.1
-        J_T = J.T
-        lambda_sq = damping * damping
-        correction = J_T @ np.linalg.inv(J @ J_T + lambda_sq * np.eye(3)) @ error
-        
-        # Apply correction with step size
-        step_size = 0.1
-        current_joints += step_size * correction
-        
-        # Enforce joint limits
-        for i, joint_name in enumerate(['shoulder', 'elbow', 'wrist', 'gripper']):
-            min_angle, max_angle = config.joint_limits[joint_name]
-            current_joints[i] = np.clip(current_joints[i], min_angle, max_angle)
-    
-    print("Failed to converge within maximum iterations")
-    return list(current_joints), False
 
 def rotm2euler(R: np.ndarray) -> np.ndarray:
     """Convert rotation matrix to Euler angles (ZYX convention).
@@ -209,48 +131,133 @@ def rotm2euler(R: np.ndarray) -> np.ndarray:
         numpy array: [roll, pitch, yaw] in radians
     """
     # Handle gimbal lock cases
-    if abs(R[2,0]) != 1:
-        pitch = -np.arcsin(R[2,0])
-        roll = np.arctan2(R[2,1]/np.cos(pitch), R[2,2]/np.cos(pitch))
-        yaw = np.arctan2(R[1,0]/np.cos(pitch), R[0,0]/np.cos(pitch))
-    else:
-        # Gimbal lock case
+    if abs(R[2,0]) > 0.9999:
         yaw = 0
-        if R[2,0] == -1:
+        if R[2,0] < 0:  # pitch = 90°
             pitch = np.pi/2
             roll = yaw + np.arctan2(R[0,1], R[0,2])
-        else:
+        else:  # pitch = -90°
             pitch = -np.pi/2
             roll = -yaw + np.arctan2(-R[0,1], -R[0,2])
+    else:
+        pitch = -np.arcsin(R[2,0])
+        cp = np.cos(pitch)
+        roll = np.arctan2(R[2,1]/cp, R[2,2]/cp)
+        yaw = np.arctan2(R[1,0]/cp, R[0,0]/cp)
     
     return np.array([roll, pitch, yaw])
 
-def get_joint_positions(joint_angles: List[float], 
-                       config: RobotConfig = default_config) -> np.ndarray:
-    """Calculate positions of all joints for visualization.
+def calculate_jacobian(joint_angles: List[float], 
+                      config: RobotConfig = default_config) -> np.ndarray:
+    """Calculate the geometric Jacobian matrix for the 6-DOF robot.
     
     Args:
-        joint_angles: List of 4 joint angles [shoulder, elbow, wrist, gripper]
+        joint_angles: List of 6 joint angles
         config: Robot configuration object
         
     Returns:
-        numpy array: Nx3 array of joint positions including base and end-effector
+        numpy array: 6x6 Jacobian matrix (linear and angular velocities)
     """
-    # Initialize positions array: base, shoulder, elbow, wrist, gripper
-    positions = np.zeros((5, 3))
-    
-    # Base position
-    positions[0] = [0, 0, 0]
-    
-    # Shoulder position
-    positions[1] = [0, 0, config.base_height]
-    
-    # Calculate cumulative transformations
+    # Get current transformations up to each joint
+    transforms = []
     T = np.eye(4)
+    
     dh_params = config.get_dh_parameters(joint_angles)
+    for params in dh_params:
+        T = T @ transform_matrix(*params)
+        transforms.append(T.copy())
     
-    for i, (theta, d, a, alpha) in enumerate(dh_params[:-1], start=2):
-        T = T @ transform_matrix(theta, d, a, alpha)
-        positions[i] = T[:3, 3]
+    # Initialize Jacobian matrix
+    J = np.zeros((6, 6))
     
-    return positions
+    # Calculate linear and angular components for each joint
+    end_position = transforms[-1][:3, 3]
+    
+    for i in range(6):
+        if i == 0:
+            # Base joint - rotation about z-axis
+            z_axis = np.array([0, 0, 1])
+            position = np.array([0, 0, config.base_height])
+        else:
+            # Get z-axis of previous transform
+            z_axis = transforms[i-1][:3, :3] @ np.array([0, 0, 1])
+            position = transforms[i-1][:3, 3]
+        
+        # Linear velocity component
+        J[:3, i] = np.cross(z_axis, end_position - position)
+        # Angular velocity component
+        J[3:, i] = z_axis
+    
+    return J
+
+def inverse_kinematics(target_position: np.ndarray,
+                      target_orientation: Optional[np.ndarray] = None,
+                      initial_guess: Optional[List[float]] = None,
+                      config: RobotConfig = default_config,
+                      max_iterations: int = 100,
+                      tolerance: float = 1e-3) -> Tuple[List[float], bool]:
+    """Calculate joint angles for a desired end-effector pose using damped least squares.
+    
+    Args:
+        target_position: Desired end-effector position [x,y,z]
+        target_orientation: Optional desired orientation [roll,pitch,yaw]
+        initial_guess: Initial joint angles guess
+        config: Robot configuration object
+        max_iterations: Maximum iterations for convergence
+        tolerance: Error tolerance for convergence
+    
+    Returns:
+        tuple: (joint_angles, success)
+    """
+    # Initialize from guess or home position
+    current_joints = np.array(initial_guess if initial_guess is not None 
+                            else config.home_position)
+    
+    for iteration in range(max_iterations):
+        # Get current end-effector pose
+        current_position, current_orientation = forward_kinematics(current_joints, config)
+        
+        # Calculate position error
+        position_error = target_position - current_position
+        
+        # Calculate orientation error if target orientation is specified
+        if target_orientation is not None:
+            orientation_error = target_orientation - current_orientation
+            # Wrap angle differences to [-pi, pi]
+            orientation_error = np.arctan2(np.sin(orientation_error), 
+                                         np.cos(orientation_error))
+            error = np.concatenate([position_error, orientation_error])
+        else:
+            error = position_error
+            
+        # Check convergence
+        if np.linalg.norm(error) < tolerance:
+            return list(current_joints), True
+        
+        # Calculate Jacobian
+        J = calculate_jacobian(current_joints, config)
+        if target_orientation is None:
+            J = J[:3, :]  # Use only position rows if no orientation target
+        
+        # Damped least squares parameters
+        lambda_sq = 0.1 * 0.1
+        
+        # Calculate joint corrections
+        J_T = J.T
+        correction = J_T @ np.linalg.inv(J @ J_T + lambda_sq * np.eye(len(error))) @ error
+        
+        # Apply correction with step size
+        step_size = 0.5
+        current_joints += step_size * correction
+        
+        # Ensure joint limits
+        valid, _ = config.check_joint_limits(current_joints)
+        if not valid:
+            # Project back to valid range
+            for i, (name, angle) in enumerate(zip(['base', 'shoulder', 'elbow', 
+                                                 'wrist_pitch', 'wrist_roll', 'gripper'], 
+                                                current_joints)):
+                min_angle, max_angle = config.joint_limits[name]
+                current_joints[i] = np.clip(angle, min_angle, max_angle)
+    
+    return list(current_joints), False
