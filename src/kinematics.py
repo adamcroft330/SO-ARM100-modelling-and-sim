@@ -14,7 +14,17 @@ def transform_matrix(theta: float, d: float, a: float, alpha: float) -> np.ndarr
         
     Returns:
         4x4 numpy array transformation matrix
+        
+    Raises:
+        ValueError: If input parameters contain NaN or infinity values
     """
+    # Input validation
+    params = [theta, d, a, alpha]
+    if any(np.isnan(p) for p in params):
+        raise ValueError("DH parameters contain NaN values")
+    if any(np.isinf(p) for p in params):
+        raise ValueError("DH parameters contain infinity values")
+    
     ct = np.cos(theta)
     st = np.sin(theta)
     ca = np.cos(alpha)
@@ -90,27 +100,45 @@ def get_joint_positions(joint_angles: List[float],
     return np.array(positions)
 
 def forward_kinematics(joint_angles: List[float], 
-                      config: RobotConfig = default_config) -> Tuple[np.ndarray, np.ndarray]:
+                      config: RobotConfig = default_config,
+                      return_all_transforms: bool = False) -> Union[Tuple[np.ndarray, np.ndarray], 
+                                                                 Tuple[np.ndarray, np.ndarray, List[np.ndarray]]]:
     """Calculate end-effector position and orientation given joint angles.
     
     Args:
         joint_angles: List of 6 joint angles
         config: Robot configuration object
+        return_all_transforms: If True, return all intermediate transformations
         
     Returns:
-        tuple: (position [x,y,z], orientation [roll,pitch,yaw])
+        If return_all_transforms is False:
+            tuple: (position [x,y,z], orientation [roll,pitch,yaw])
+        If return_all_transforms is True:
+            tuple: (position [x,y,z], orientation [roll,pitch,yaw], list of transforms)
     """
+    # Input validation
+    if not isinstance(joint_angles, (list, np.ndarray)) or len(joint_angles) != 6:
+        raise ValueError("joint_angles must be a list or array of length 6")
+    
+    if any(np.isnan(angle) for angle in joint_angles):
+        raise ValueError("Joint angles contain NaN values")
+        
+    if any(np.isinf(angle) for angle in joint_angles):
+        raise ValueError("Joint angles contain infinity values")
+    
     # Validate joint angles
     valid, message = config.check_joint_limits(joint_angles)
     if not valid:
         raise ValueError(f"Invalid joint angles: {message}")
     
     # Calculate cumulative transformation
+    transforms = [np.eye(4)]  # Include initial transform
     T = np.eye(4)
     dh_params = config.get_dh_parameters(joint_angles)
     
     for params in dh_params:
         T = T @ transform_matrix(*params)
+        transforms.append(T.copy())
     
     # Extract position and orientation
     position = T[:3, 3]
@@ -119,6 +147,8 @@ def forward_kinematics(joint_angles: List[float],
     R = T[:3, :3]
     orientation = rotm2euler(R)
     
+    if return_all_transforms:
+        return position, orientation, transforms
     return position, orientation
 
 def rotm2euler(R: np.ndarray) -> np.ndarray:
@@ -132,18 +162,24 @@ def rotm2euler(R: np.ndarray) -> np.ndarray:
     """
     # Handle gimbal lock cases
     if abs(R[2,0]) > 0.9999:
-        yaw = 0
-        if R[2,0] < 0:  # pitch = 90°
-            pitch = np.pi/2
-            roll = yaw + np.arctan2(R[0,1], R[0,2])
-        else:  # pitch = -90°
+        # Gimbal lock case
+        yaw = np.arctan2(R[1,2], R[1,1])
+        if R[2,0] > 0:  # pitch = -90°
             pitch = -np.pi/2
-            roll = -yaw + np.arctan2(-R[0,1], -R[0,2])
+            roll = 0
+        else:  # pitch = 90°
+            pitch = np.pi/2
+            roll = 0
     else:
+        # Normal case
         pitch = -np.arcsin(R[2,0])
-        cp = np.cos(pitch)
-        roll = np.arctan2(R[2,1]/cp, R[2,2]/cp)
-        yaw = np.arctan2(R[1,0]/cp, R[0,0]/cp)
+        roll = np.arctan2(R[2,1], R[2,2])
+        yaw = np.arctan2(R[1,0], R[0,0])
+        
+        # Ensure angles are in the correct range
+        roll = np.mod(roll + np.pi, 2*np.pi) - np.pi
+        pitch = np.mod(pitch + np.pi/2, np.pi) - np.pi/2
+        yaw = np.mod(yaw + np.pi, 2*np.pi) - np.pi
     
     return np.array([roll, pitch, yaw])
 
@@ -158,14 +194,8 @@ def calculate_jacobian(joint_angles: List[float],
     Returns:
         numpy array: 6x6 Jacobian matrix (linear and angular velocities)
     """
-    # Get current transformations up to each joint
-    transforms = []
-    T = np.eye(4)
-    
-    dh_params = config.get_dh_parameters(joint_angles)
-    for params in dh_params:
-        T = T @ transform_matrix(*params)
-        transforms.append(T.copy())
+    # Reuse transformations from forward kinematics
+    _, _, transforms = forward_kinematics(joint_angles, config, return_all_transforms=True)
     
     # Initialize Jacobian matrix
     J = np.zeros((6, 6))
@@ -180,8 +210,8 @@ def calculate_jacobian(joint_angles: List[float],
             position = np.array([0, 0, config.base_height])
         else:
             # Get z-axis of previous transform
-            z_axis = transforms[i-1][:3, :3] @ np.array([0, 0, 1])
-            position = transforms[i-1][:3, 3]
+            z_axis = transforms[i][:3, :3] @ np.array([0, 0, 1])
+            position = transforms[i][:3, 3]
         
         # Linear velocity component
         J[:3, i] = np.cross(z_axis, end_position - position)

@@ -14,15 +14,15 @@ class RobotConfig:
     """
     
     # Physical structure parameters (in meters)
-    base_height: float = 0.020  # Height of base platform (d₁)
+    base_height: float = 0.005  # Height of base platform (d₁)
     base_width: float = 0.080   # Width of base platform
     
     # Main linkage lengths (in meters)
     link1_length: float = 0.040  # Upper arm length (a₂)
     link2_length: float = 0.040  # Forearm length (a₃)
-    wrist_length: float = 0.020  # Wrist extension length (a₄)
-    wrist_offset: float = 0.006  # Wrist to gripper offset (a₅)
-    gripper_length: float = 0.024  # Gripper servo length (a₆)
+    wrist_length: float = 0.005  # Wrist extension length (a₄)
+    wrist_offset: float = 0.005  # Wrist to gripper offset (a₅)
+    gripper_length: float = 0.010  # Gripper servo length (a₆)
     
     # Servo dimensions (in meters)
     servo_width: float = 0.012    # Standard servo width
@@ -52,7 +52,7 @@ class RobotConfig:
             pi/2,   # Base centered (90°)
             0.0,    # Shoulder horizontal (0°)
             pi/2,   # Elbow perpendicular (90°)
-            -pi/2,  # Wrist pitch level (-90°)
+            0.0,    # Wrist pitch level (0°)
             0.0,    # Wrist roll centered (0°)
             pi/6    # Gripper half open (30°)
         ]
@@ -64,7 +64,7 @@ class RobotConfig:
             [pi/2, 0, self.link1_length, 0],       # S2: Shoulder (includes 90° offset)
             [0, 0, self.link2_length, 0],          # S3: Elbow
             [0, 0, self.wrist_length, -pi/2],      # S4: Wrist pitch
-            [0, 0, self.wrist_offset, pi/2],       # S5: Wrist roll
+            [0, 0, self.wrist_offset, -pi/2],      # S5: Wrist roll (modified to rotate like base)
             [0, 0, self.gripper_length, 0]         # S6: Gripper rotation
         ]
         
