@@ -89,7 +89,12 @@ def get_joint_positions(joint_angles: List[float],
             pos = T[:3, 3].copy()
             positions.append(pos - np.array([0, 0, config.servo_height/2]))
             
-        elif i == 4:  # Wrist roll joint
+        elif i == 3:  # Wrist pitch joint (S4)
+            # Add point for wrist pitch segment
+            pos = T[:3, 3].copy()
+            positions.append(pos)
+            
+        elif i == 4:  # Wrist roll joint (S5)
             # Add points for gripper mount
             pos = T[:3, 3].copy()
             positions.append(pos)
@@ -224,24 +229,17 @@ def inverse_kinematics(target_position: np.ndarray,
                       target_orientation: Optional[np.ndarray] = None,
                       initial_guess: Optional[List[float]] = None,
                       config: RobotConfig = default_config,
-                      max_iterations: int = 100,
-                      tolerance: float = 1e-3) -> Tuple[List[float], bool]:
-    """Calculate joint angles for a desired end-effector pose using damped least squares.
-    
-    Args:
-        target_position: Desired end-effector position [x,y,z]
-        target_orientation: Optional desired orientation [roll,pitch,yaw]
-        initial_guess: Initial joint angles guess
-        config: Robot configuration object
-        max_iterations: Maximum iterations for convergence
-        tolerance: Error tolerance for convergence
-    
-    Returns:
-        tuple: (joint_angles, success)
-    """
+                      max_iterations: int = 200,
+                      tolerance: float = 1e-4) -> Tuple[List[float], bool]:
+    """Calculate joint angles for a desired end-effector pose using damped least squares."""
     # Initialize from guess or home position
     current_joints = np.array(initial_guess if initial_guess is not None 
                             else config.home_position)
+    
+    # Validate target is within reach
+    target_distance = np.linalg.norm(target_position)
+    if target_distance > config.max_reach or target_distance < config.min_reach:
+        return list(current_joints), False
     
     for iteration in range(max_iterations):
         # Get current end-effector pose
@@ -261,7 +259,8 @@ def inverse_kinematics(target_position: np.ndarray,
             error = position_error
             
         # Check convergence
-        if np.linalg.norm(error) < tolerance:
+        error_magnitude = np.linalg.norm(error)
+        if error_magnitude < tolerance:
             return list(current_joints), True
         
         # Calculate Jacobian
@@ -269,25 +268,36 @@ def inverse_kinematics(target_position: np.ndarray,
         if target_orientation is None:
             J = J[:3, :]  # Use only position rows if no orientation target
         
-        # Damped least squares parameters
-        lambda_sq = 0.1 * 0.1
+        # Adaptive damping based on error and iteration
+        lambda_base = 0.001  # Smaller base damping
+        lambda_sq = (lambda_base + min(error_magnitude, 0.1)) ** 2
         
         # Calculate joint corrections
         J_T = J.T
         correction = J_T @ np.linalg.inv(J @ J_T + lambda_sq * np.eye(len(error))) @ error
         
-        # Apply correction with step size
-        step_size = 0.5
-        current_joints += step_size * correction
+        # Adaptive step size based on error
+        max_step = min(0.2, max(0.01, error_magnitude))  # Smaller steps near solution
+        correction_magnitude = np.linalg.norm(correction)
+        if correction_magnitude > max_step:
+            correction = (max_step / correction_magnitude) * correction
         
-        # Ensure joint limits
-        valid, _ = config.check_joint_limits(current_joints)
-        if not valid:
-            # Project back to valid range
-            for i, (name, angle) in enumerate(zip(['base', 'shoulder', 'elbow', 
-                                                 'wrist_pitch', 'wrist_roll', 'gripper'], 
-                                                current_joints)):
-                min_angle, max_angle = config.joint_limits[name]
-                current_joints[i] = np.clip(angle, min_angle, max_angle)
+        # Apply correction
+        current_joints += correction
+        
+        # Ensure joint limits with smooth clamping
+        for i, (name, angle) in enumerate(zip(['base', 'shoulder', 'elbow', 
+                                             'wrist_pitch', 'wrist_roll', 'gripper'], 
+                                            current_joints)):
+            min_angle, max_angle = config.joint_limits[name]
+            # Smooth clamping near limits
+            margin = np.radians(2)  # 2 degree margin
+            if angle < min_angle + margin:
+                factor = (angle - min_angle) / margin
+                current_joints[i] = min_angle + margin * np.tanh(factor)
+            elif angle > max_angle - margin:
+                factor = (max_angle - angle) / margin
+                current_joints[i] = max_angle - margin * np.tanh(factor)
     
+    # Failed to converge
     return list(current_joints), False

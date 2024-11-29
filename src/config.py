@@ -14,15 +14,15 @@ class RobotConfig:
     """
     
     # Physical structure parameters (in meters)
-    base_height: float = 0.005  # Height of base platform (d₁)
+    base_height: float = 0.010  # Height of base platform (d₁)
     base_width: float = 0.080   # Width of base platform
     
     # Main linkage lengths (in meters)
-    link1_length: float = 0.040  # Upper arm length (a₂)
-    link2_length: float = 0.040  # Forearm length (a₃)
-    wrist_length: float = 0.005  # Wrist extension length (a₄)
-    wrist_offset: float = 0.005  # Wrist to gripper offset (a₅)
-    gripper_length: float = 0.010  # Gripper servo length (a₆)
+    link1_length: float = 0.060  # Upper arm length (a₂)
+    link2_length: float = 0.060  # Forearm length (a₃)
+    wrist_length: float = 0.020  # Wrist extension length (a₄)
+    wrist_offset: float = 0.015  # Wrist to gripper offset (a₅)
+    gripper_length: float = 0.015  # Gripper servo length (a₆)
     
     # Servo dimensions (in meters)
     servo_width: float = 0.012    # Standard servo width
@@ -39,10 +39,10 @@ class RobotConfig:
         # Joint limits (in radians)
         self.joint_limits = {
             'base': (0, pi),           # S1: 0° to 180°
-            'shoulder': (-pi/2, pi/2),  # S2: -90° to +90°
+            'shoulder': (0, pi),  # S2: 0° to +180°
             'elbow': (0, pi),          # S3: 0° to 180°
-            'wrist_pitch': (-pi, 0),    # S4: -180° to 0°
-            'wrist_roll': (-pi/2, pi/2), # S5: -90° to +90°
+            'wrist_pitch': (-pi/2, pi/2),  # S4: -90° to +90°
+            'wrist_roll': (-pi/2, pi/2),    # S5: -90° to +90°
             'gripper': (0, pi/3)        # S6: 0° to 60°
         }
         
@@ -50,9 +50,9 @@ class RobotConfig:
         # Places arm in forward-facing, slightly raised position
         self.home_position = [
             pi/2,   # Base centered (90°)
-            0.0,    # Shoulder horizontal (0°)
+            -pi/4,  # Shoulder raised (-45°)
             pi/2,   # Elbow perpendicular (90°)
-            0.0,    # Wrist pitch level (0°)
+            -pi/4,  # Wrist pitch angled (-45°)
             0.0,    # Wrist roll centered (0°)
             pi/6    # Gripper half open (30°)
         ]
@@ -60,11 +60,11 @@ class RobotConfig:
         # DH parameters template [theta, d, a, alpha]
         # theta is variable for each joint, so it's set to 0 here
         self.dh_base_params = [
-            [0, self.base_height, 0, pi/2],        # S1: Base rotation
-            [pi/2, 0, self.link1_length, 0],       # S2: Shoulder (includes 90° offset)
+            [0, self.base_height, 0, pi/2],        # S1: Base rotation (yaw around Z)
+            [0, 0, self.link1_length, 0],          # S2: Shoulder (no offset needed)
             [0, 0, self.link2_length, 0],          # S3: Elbow
-            [0, 0, self.wrist_length, -pi/2],      # S4: Wrist pitch
-            [0, 0, self.wrist_offset, -pi/2],      # S5: Wrist roll (modified to rotate like base)
+            [0, 0, self.wrist_length, pi/2],       # S4: Wrist pitch
+            [0, 0, self.wrist_offset, -pi/2],      # S5: Wrist roll (set up roll axis)
             [0, 0, self.gripper_length, 0]         # S6: Gripper rotation
         ]
         
@@ -100,10 +100,7 @@ class RobotConfig:
         for i, base_param in enumerate(self.dh_base_params):
             # Copy base parameters and update theta
             param = base_param.copy()
-            if i == 1:  # Shoulder joint
-                param[0] = joint_angles[i] + pi/2  # Add 90° offset
-            else:
-                param[0] = joint_angles[i]
+            param[0] = joint_angles[i]  # Direct angle assignment
             dh_params.append(param)
         return dh_params
     

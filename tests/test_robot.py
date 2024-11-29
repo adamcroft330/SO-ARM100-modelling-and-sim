@@ -20,16 +20,16 @@ def test_basic_movement():
     print("\nTest 1: Forward Kinematics from home position")
     home_angles = config.home_position
     position, orientation = forward_kinematics(home_angles, config)
-    print(f"Home position end-effector location: {position * 1000:.1f} mm")
-    print(f"Home position orientation (roll,pitch,yaw): {np.degrees(orientation):.1f}°")
+    print(f"Home position end-effector location: [{position[0]*1000:.1f}, {position[1]*1000:.1f}, {position[2]*1000:.1f}] mm")
+    print(f"Home position orientation (roll,pitch,yaw): [{orientation[0]*180/np.pi:.1f}, {orientation[1]*180/np.pi:.1f}, {orientation[2]*180/np.pi:.1f}]°")
     
     # Test 2: Multiple IK targets
     print("\nTest 2: Testing multiple IK targets")
     test_positions = [
-        np.array([0.10, 0, 0.15]),     # Forward reach
-        np.array([0, 0.10, 0.10]),     # Side reach
-        np.array([0.07, 0.07, 0.20]),  # Diagonal reach
-        np.array([-0.05, 0.05, 0.15])  # Back diagonal
+        np.array([0.05, 0, 0.07]),     # Forward reach
+        np.array([0, 0.05, 0.05]),     # Side reach
+        np.array([0.03, 0.03, 0.08]),  # Diagonal reach
+        np.array([-0.02, 0.02, 0.06])  # Back diagonal
     ]
     
     fig = plt.figure(figsize=(15, 10))
@@ -53,7 +53,7 @@ def test_basic_movement():
     
     # Test each target
     for i, target in enumerate(test_positions):
-        print(f"\nTesting target {i+1}: {target * 1000:.1f} mm")
+        print(f"\nTesting target {i+1}: [{target[0]*1000:.1f}, {target[1]*1000:.1f}, {target[2]*1000:.1f}] mm")
         
         # Plot target
         ax.scatter(*target, color='r', marker='*', s=100, label=f'Target {i+1}')
@@ -97,8 +97,8 @@ def test_basic_movement():
         if valid:
             print("Joint configuration valid")
             position, orientation = forward_kinematics(angles, config)
-            print(f"End-effector position: {position * 1000:.1f} mm")
-            print(f"End-effector orientation: {np.degrees(orientation):.1f}°")
+            print(f"End-effector position: [{position[0]*1000:.1f}, {position[1]*1000:.1f}, {position[2]*1000:.1f}] mm")
+            print(f"End-effector orientation: [{orientation[0]*180/np.pi:.1f}, {orientation[1]*180/np.pi:.1f}, {orientation[2]*180/np.pi:.1f}]°")
         else:
             print(f"Invalid configuration: {message}")
     
@@ -112,7 +112,7 @@ def test_basic_movement():
     ]
     
     for pos in singular_positions:
-        print(f"\nTesting near-singular position: {pos * 1000:.1f} mm")
+        print(f"\nTesting near-singular position: [{pos[0]*1000:.1f}, {pos[1]*1000:.1f}, {pos[2]*1000:.1f}] mm")
         joint_angles, success = inverse_kinematics(pos, config=config, tolerance=1e-2)
         if success:
             print("Found solution near singular position")

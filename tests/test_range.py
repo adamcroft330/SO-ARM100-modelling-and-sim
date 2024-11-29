@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.widgets import Slider
 from src.config import RobotConfig
-from src.kinematics import get_joint_positions
+from src.kinematics import get_joint_positions, forward_kinematics
 from typing import List, Dict
 import numpy as np
 
@@ -49,6 +49,15 @@ def create_robot_visualization():
     # Create main 3D axis for robot on the right side
     ax_robot = fig.add_axes([0.35, 0.1, 0.6, 0.8], projection='3d')  # [left, bottom, width, height]
     setup_3d_axis(ax_robot, 'SO-ARM100 Joint Control', config.max_reach)
+    
+    # Create coordinate frame lines for each joint
+    axis_length = config.link1_length * 0.2  # Scale axis visualization
+    coord_frames = []
+    for i in range(7):  # One frame for each transform (including wrist pitch linkage)
+        x_axis = ax_robot.plot([], [], [], 'r-', linewidth=1, alpha=0.8)[0]  # X axis in red
+        y_axis = ax_robot.plot([], [], [], 'g-', linewidth=1, alpha=0.8)[0]  # Y axis in green
+        z_axis = ax_robot.plot([], [], [], 'b-', linewidth=1, alpha=0.8)[0]  # Z axis in blue
+        coord_frames.append((x_axis, y_axis, z_axis))
     
     # Create slider axes on the left side
     slider_axes = []
@@ -119,58 +128,97 @@ def create_robot_visualization():
     
     # Create visualization elements
     segments = []
-    segments.append(ax_robot.plot([], [], [], color='#3498db', linewidth=6, alpha=0.8)[0])  # Base
-    segments.append(ax_robot.plot([], [], [], color='#3498db', linewidth=5, alpha=0.8)[0])  # Shoulder to elbow
-    segments.append(ax_robot.plot([], [], [], color='#3498db', linewidth=4, alpha=0.8)[0])  # Elbow to wrist
-    segments.append(ax_robot.plot([], [], [], color='#3498db', linewidth=3, alpha=0.8)[0])  # Wrist segments
-    segments.append(ax_robot.plot([], [], [], color='#3498db', linewidth=2, alpha=0.8)[0])  # Gripper base
+    segments.append(ax_robot.plot([], [], [], color='#2c3e50', linewidth=6, alpha=0.8)[0])  # Base (dark blue)
+    segments.append(ax_robot.plot([], [], [], color='#e74c3c', linewidth=5, alpha=0.8)[0])  # Upper arm (red)
+    segments.append(ax_robot.plot([], [], [], color='#2ecc71', linewidth=4, alpha=0.8)[0])  # Forearm (green)
+    segments.append(ax_robot.plot([], [], [], color='#f1c40f', linewidth=3, alpha=0.8)[0])  # Wrist pitch (yellow)
+    segments.append(ax_robot.plot([], [], [], color='#9b59b6', linewidth=2, alpha=0.8)[0])  # Wrist roll (purple)
     
-    gripper_fixed = ax_robot.plot([], [], [], color='#e17055', linewidth=2, alpha=0.8)[0]
-    gripper_moving = ax_robot.plot([], [], [], color='#e17055', linewidth=2, alpha=0.8)[0]
-    
+    # Create gripper visualization
+    gripper_base = ax_robot.plot([], [], [], color='#e67e22', linewidth=2, alpha=0.8)[0]  # Gripper mount (orange)
+    gripper_fixed = ax_robot.plot([], [], [], color='#1abc9c', linewidth=2, alpha=0.8)[0]  # Fixed claw (turquoise)
+    gripper_moving = ax_robot.plot([], [], [], color='#1abc9c', linewidth=2, alpha=0.8)[0]  # Moving claw (turquoise)
+
+    def update_coordinate_frame(frame_lines, transform, scale):
+        """Update coordinate frame visualization based on transformation matrix."""
+        origin = transform[:3, 3]
+        x_axis = transform[:3, 0]
+        y_axis = transform[:3, 1]
+        z_axis = transform[:3, 2]
+        
+        # X axis (red)
+        frame_lines[0].set_data_3d([origin[0], origin[0] + scale * x_axis[0]],
+                                 [origin[1], origin[1] + scale * x_axis[1]],
+                                 [origin[2], origin[2] + scale * x_axis[2]])
+        
+        # Y axis (green)
+        frame_lines[1].set_data_3d([origin[0], origin[0] + scale * y_axis[0]],
+                                 [origin[1], origin[1] + scale * y_axis[1]],
+                                 [origin[2], origin[2] + scale * y_axis[2]])
+        
+        # Z axis (blue)
+        frame_lines[2].set_data_3d([origin[0], origin[0] + scale * z_axis[0]],
+                                 [origin[1], origin[1] + scale * z_axis[1]],
+                                 [origin[2], origin[2] + scale * z_axis[2]])
+
     def update_robot(val=None):
         """Update robot visualization based on slider values."""
-        # Get current joint angles from sliders
-        joint_angles = [slider.val for slider in slider_axes]
-        
         try:
+            # Get current joint angles from sliders
+            joint_angles = [slider.val for slider in slider_axes]
+            
             # Calculate new positions
             pos = get_joint_positions(joint_angles, config)
             
+            # Get forward kinematics for orientation
+            _, _, transforms = forward_kinematics(joint_angles, config, return_all_transforms=True)
+            
+            # Update coordinate frames for each joint
+            for i, transform in enumerate(transforms[1:]):  # Skip initial identity transform
+                update_coordinate_frame(coord_frames[i], transform, axis_length)
+            
             # Update arm segments
-            segments[0].set_data_3d([0, 0], [0, 0], [0, pos[1][2]])
-            segments[1].set_data_3d([pos[1][0], pos[3][0]], [pos[1][1], pos[3][1]], [pos[1][2], pos[3][2]])
-            segments[2].set_data_3d([pos[3][0], pos[5][0]], [pos[3][1], pos[5][1]], [pos[3][2], pos[5][2]])
-            segments[3].set_data_3d([pos[5][0], pos[6][0]], [pos[5][1], pos[6][1]], [pos[5][2], pos[6][2]])
-            segments[4].set_data_3d([pos[6][0], pos[7][0]], [pos[6][1], pos[7][1]], [pos[6][2], pos[7][2]])
+            segments[0].set_data_3d([0, 0], [0, 0], [0, pos[1][2]])  # Base
+            segments[1].set_data_3d([pos[1][0], pos[4][0]], [pos[1][1], pos[4][1]], [pos[1][2], pos[4][2]])  # Upper arm
+            segments[2].set_data_3d([pos[4][0], pos[6][0]], [pos[4][1], pos[6][1]], [pos[4][2], pos[6][2]])  # Forearm
+            segments[3].set_data_3d([pos[6][0], pos[7][0]], [pos[6][1], pos[7][1]], [pos[6][2], pos[7][2]])  # Wrist pitch
+            segments[4].set_data_3d([pos[7][0], pos[8][0]], [pos[7][1], pos[8][1]], [pos[7][2], pos[8][2]])  # Wrist roll
+            
+            # Extract orientation vectors from roll transform for gripper
+            wrist_dir = transforms[-1][:3, 0]  # X-axis after roll
+            up = transforms[-1][:3, 2]         # Z-axis after roll
             
             # Update gripper
-            gripper_length = config.gripper_length * 0.5
+            gripper_end = pos[8] + wrist_dir * config.gripper_length
+            gripper_base.set_data_3d([pos[8][0], gripper_end[0]], 
+                                   [pos[8][1], gripper_end[1]], 
+                                   [pos[8][2], gripper_end[2]])
+            
+            # Update gripper claws
+            gripper_length = config.gripper_length * 0.7
             gripper_width = config.gripper_servo_width * 0.5
+            curve_points = 8
             
-            # Calculate gripper orientation vectors
-            end_dir = pos[-1] - pos[-2]
-            end_dir = end_dir / np.linalg.norm(end_dir)
+            t = np.linspace(0, 1, curve_points)
+            curve_x = gripper_length * t
+            curve_y = gripper_width * np.sin(t * np.pi * 0.5)
             
-            up = np.array([0, 0, 1])
-            side = np.cross(end_dir, up)
-            if np.linalg.norm(side) < 1e-10:
-                side = np.array([1, 0, 0])
-            side = side / np.linalg.norm(side)
+            # Fixed bottom claw
+            fixed_points_x = pos[8][0] + wrist_dir[0] * curve_x - up[0] * curve_y
+            fixed_points_y = pos[8][1] + wrist_dir[1] * curve_x - up[1] * curve_y
+            fixed_points_z = pos[8][2] + wrist_dir[2] * curve_x - up[2] * curve_y
             
-            base_pos = pos[-1]
+            gripper_fixed.set_data_3d(fixed_points_x, fixed_points_y, fixed_points_z)
             
-            # Fixed claw
-            fixed_tip = base_pos + end_dir * gripper_length - side * gripper_width
-            gripper_fixed.set_data_3d([base_pos[0], fixed_tip[0]],
-                                    [base_pos[1], fixed_tip[1]],
-                                    [base_pos[2], fixed_tip[2]])
+            # Moving top claw
+            grip_angle = joint_angles[5]
+            gap = gripper_width * 2 * (1 - grip_angle/config.joint_limits['gripper'][1])
             
-            # Moving claw
-            moving_tip = base_pos + end_dir * gripper_length + side * gripper_width * np.cos(joint_angles[5])
-            gripper_moving.set_data_3d([base_pos[0], moving_tip[0]],
-                                     [base_pos[1], moving_tip[1]],
-                                     [base_pos[2], moving_tip[2]])
+            moving_points_x = pos[8][0] + wrist_dir[0] * curve_x + up[0] * (curve_y + gap)
+            moving_points_y = pos[8][1] + wrist_dir[1] * curve_x + up[1] * (curve_y + gap)
+            moving_points_z = pos[8][2] + wrist_dir[2] * curve_x + up[2] * (curve_y + gap)
+            
+            gripper_moving.set_data_3d(moving_points_x, moving_points_y, moving_points_z)
             
             # Update angle displays
             for slider in slider_axes:
@@ -187,6 +235,12 @@ def create_robot_visualization():
     
     # Initial update
     update_robot()
+    
+    # Add legend for coordinate axes
+    ax_robot.plot([], [], [], 'r-', label='X axis', alpha=0.8)
+    ax_robot.plot([], [], [], 'g-', label='Y axis', alpha=0.8)
+    ax_robot.plot([], [], [], 'b-', label='Z axis', alpha=0.8)
+    ax_robot.legend(loc='upper right', fontsize=8)
     
     plt.show()
 
