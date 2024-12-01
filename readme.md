@@ -65,8 +65,8 @@ so-arm100/
 
 1. **Installation**
    ```bash
-   git clone https://github.com/yourusername/so-arm100.git
-   cd so-arm100
+   git clone https://github.com/adamcroft330/SO-ARM100-modelling-and-sim.git
+   cd SO-ARM100-modelling-and-sim
    pip install -r requirements.txt
    ```
 
@@ -121,6 +121,8 @@ python -m pytest tests/
 
 ## Contributing 🤝
 
+A huge thank you to my best friend Ollie for his contributions, specifically in creating the blender model with IK and constraints in just a few hours with no robotics experience.
+
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
 ## License 📄
@@ -135,9 +137,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Uses numpy for mathematical computations
 
 ## Contact 📧
+Email: adamcroft330@gmail.com
 
 For questions and support, please open an issue in the GitHub repository.
 
 ---
 
-Made with ❤️ by [Your Name/Organization]
+Made by the boys.]
